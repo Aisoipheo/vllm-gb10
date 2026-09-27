@@ -184,6 +184,40 @@ def test_verify_image_models_workflow_is_dispatch_only_and_catalog_gated():
     assert "models:" in workflow
 
 
+def test_upload_artifact_if_no_files_found_uses_supported_values():
+    # actions/upload-artifact v7 accepts only warn, error, and ignore for
+    # if-no-files-found. The value "warning" is not valid and fails the step
+    # with "Unrecognized if-no-files-found input", which broke a manual
+    # verify-image-models dispatch on the serve+bench artifact upload.
+    for path in WORKFLOWS.glob("*.yaml"):
+        workflow = read(path)
+        assert "if-no-files-found: warning" not in workflow, path
+        for value in re.findall(
+            r"if-no-files-found:\s*([a-z]+)", workflow
+        ):
+            assert value in ("warn", "error", "ignore"), (
+                f"{path.name}: unsupported if-no-files-found value {value!r}"
+            )
+
+
+def test_verify_image_models_upload_step_uses_supported_artifact_input():
+    # Direct guard for the serve+bench artifact upload step that failed a
+    # manual dispatch with "Unrecognized if-no-files-found input.
+    # Provided: warning.". The step must keep a supported value and keep
+    # uploading the verify results directory.
+    workflow = read(WORKFLOWS / "verify-image-models.yaml")
+    upload_step = workflow.split(
+        "- name: Upload serve and bench results", 1
+    )[1]
+    assert "actions/upload-artifact@" in upload_step
+    assert "path: verify/results/" in upload_step
+    values = re.findall(r"if-no-files-found:\s*([a-z]+)", upload_step)
+    assert values, "upload step must declare an if-no-files-found value"
+    assert values[0] in ("warn", "error", "ignore"), (
+        f"upload step uses unsupported if-no-files-found value {values[0]!r}"
+    )
+
+
 def test_privileged_workflows_reject_untrusted_refs():
     monitor = read(WORKFLOWS / "monitor-upstream-releases.yaml")
     assert 'WORKFLOW_REF: ${{ github.ref }}' in monitor
@@ -412,6 +446,9 @@ def main():
         test_promote_workflow_reverifies_before_branch_creation,
         test_promote_workflow_checks_reviewer_permission,
         test_verify_checks_fail_closed,
+        test_verify_image_models_workflow_is_dispatch_only_and_catalog_gated,
+        test_upload_artifact_if_no_files_found_uses_supported_values,
+        test_verify_image_models_upload_step_uses_supported_artifact_input,
         test_promote_workflow_paginates_reviews,
         test_comment_uses_correct_syntax,
     ]
